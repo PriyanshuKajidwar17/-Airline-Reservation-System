@@ -1,0 +1,139 @@
+-- ==============================
+-- 1. Create Database
+-- ==============================
+CREATE DATABASE employee_mgmt;
+\c employee_mgmt;
+
+-- ==============================
+-- 2. Create Tables
+-- ==============================
+
+-- Department Table
+CREATE TABLE Departments (
+    dept_id SERIAL PRIMARY KEY,
+    dept_name VARCHAR(100) NOT NULL
+);
+
+-- Roles Table
+CREATE TABLE Roles (
+    role_id SERIAL PRIMARY KEY,
+    role_name VARCHAR(100) NOT NULL
+);
+
+-- Employees Table
+CREATE TABLE Employees (
+    emp_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    dept_id INT REFERENCES Departments(dept_id) ON DELETE SET NULL,
+    role_id INT REFERENCES Roles(role_id) ON DELETE SET NULL,
+    hire_date DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+-- Attendance Table
+CREATE TABLE Attendance (
+    att_id SERIAL PRIMARY KEY,
+    emp_id INT REFERENCES Employees(emp_id) ON DELETE CASCADE,
+    check_in TIMESTAMP,
+    check_out TIMESTAMP,
+    status VARCHAR(20), -- Present, Absent, Late
+    work_hours NUMERIC(5,2)
+);
+
+-- ==============================
+-- 3. Insert Dummy Data
+-- ==============================
+
+-- Departments
+INSERT INTO Departments (dept_name) VALUES
+('HR'), ('IT'), ('Finance'), ('Marketing'), ('Operations');
+
+-- Roles
+INSERT INTO Roles (role_name) VALUES
+('Manager'), ('Software Engineer'), ('Accountant'), ('HR Executive'), ('Marketing Lead');
+
+-- Employees (200+ dummy records can be generated, here’s a few)
+INSERT INTO Employees (first_name, last_name, dept_id, role_id) VALUES
+('Amit', 'Sharma', 2, 2),
+('Priya', 'Mehta', 1, 4),
+('Rahul', 'Verma', 3, 3),
+('Sneha', 'Patel', 2, 2),
+('Vikram', 'Rao', 4, 5);
+
+-- Attendance (sample entries)
+INSERT INTO Attendance (emp_id, check_in, check_out, status)
+VALUES
+(1, '2025-09-01 09:05:00', '2025-09-01 17:30:00', 'Late'),
+(2, '2025-09-01 08:55:00', '2025-09-01 17:00:00', 'Present'),
+(3, '2025-09-01 09:30:00', '2025-09-01 16:45:00', 'Late'),
+(4, '2025-09-01 09:00:00', '2025-09-01 18:00:00', 'Present');
+
+-- ==============================
+-- 4. Triggers for Timestamp & Status
+-- ==============================
+
+-- Function to auto-calculate status
+CREATE OR REPLACE FUNCTION set_attendance_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.check_in::time > '09:15:00' THEN
+        NEW.status := 'Late';
+    ELSE
+        NEW.status := 'Present';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger
+CREATE TRIGGER trg_set_status
+BEFORE INSERT OR UPDATE ON Attendance
+FOR EACH ROW EXECUTE FUNCTION set_attendance_status();
+
+-- ==============================
+-- 5. Functions to Calculate Work Hours
+-- ==============================
+
+CREATE OR REPLACE FUNCTION calculate_work_hours(check_in TIMESTAMP, check_out TIMESTAMP)
+RETURNS NUMERIC AS $$
+BEGIN
+    RETURN EXTRACT(EPOCH FROM (check_out - check_in)) / 3600.0; -- hours
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update work_hours automatically
+CREATE OR REPLACE FUNCTION set_work_hours()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.check_out IS NOT NULL THEN
+        NEW.work_hours := calculate_work_hours(NEW.check_in, NEW.check_out);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_set_work_hours
+BEFORE INSERT OR UPDATE ON Attendance
+FOR EACH ROW EXECUTE FUNCTION set_work_hours();
+
+-- ==============================
+-- 6. Queries & Reports
+-- ==============================
+
+-- Monthly Attendance Count
+SELECT emp_id, COUNT(*) AS total_days
+FROM Attendance
+WHERE DATE_PART('month', check_in) = 9
+GROUP BY emp_id;
+
+-- Late Arrivals Report
+SELECT emp_id, COUNT(*) AS late_days
+FROM Attendance
+WHERE status = 'Late'
+GROUP BY emp_id
+HAVING COUNT(*) > 2;
+
+-- Total Work Hours Report
+SELECT emp_id, SUM(work_hours) AS total_hours
+FROM Attendance
+GROUP BY emp_id;
